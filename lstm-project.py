@@ -1,4 +1,3 @@
-# lstm-project.py
 import os
 import pickle
 import nltk
