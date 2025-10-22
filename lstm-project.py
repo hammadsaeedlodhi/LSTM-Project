@@ -17,21 +17,34 @@ np.random.seed(42)
 tf.random.set_seed(42)
 
 # -----------------------------
-# 1) Load or fetch Hamlet text
+# 1) Load or fetch Shakespeare text (Hamlet + others)
 # -----------------------------
 nltk.download('gutenberg', quiet=True)
 
-if os.path.exists('hamlet.txt'):
-    with open('hamlet.txt', 'r', encoding='utf-8') as f:
-        text = f.read().lower()
-else:
-    from nltk.corpus import gutenberg
-    text = gutenberg.raw('shakespeare-hamlet.txt').lower()
-    with open('hamlet.txt', 'w', encoding='utf-8') as f:
-        f.write(text)
+from nltk.corpus import gutenberg
+
+# Use multiple plays for richer vocabulary
+plays = [
+    'shakespeare-hamlet.txt',
+    'shakespeare-caesar.txt',
+    'shakespeare-macbeth.txt'
+]
+
+text = ""
+for play in plays:
+    try:
+        text += gutenberg.raw(play).lower() + "\n"
+    except:
+        pass
+
+# Save combined file for reference
+with open('hamlet.txt', 'w', encoding='utf-8') as f:
+    f.write(text)
 
 text = text.replace('\r', '')
 text = "\n".join(line.strip() for line in text.splitlines())
+
+print(f"[INFO] Text length: {len(text)} characters")
 
 # -----------------------------
 # 2) Tokenization and sequence building
@@ -82,26 +95,24 @@ X_train, X_test, y_train, y_test = train_test_split(
 # -----------------------------
 # 4) Callback
 # -----------------------------
-early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+early_stopping = EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True)
 
 # -----------------------------
-# 5) Build model
+# 5) Build model (larger, more capable)
 # -----------------------------
-embedding_dim = 100
-lstm_units_1 = 150
-lstm_units_2 = 100
+embedding_dim = 128
+lstm_units_1 = 256
+lstm_units_2 = 256
 
 model = Sequential([
     Embedding(input_dim=total_words, output_dim=embedding_dim, input_length=max_sequence_len - 1),
     LSTM(lstm_units_1, return_sequences=True),
-    Dropout(0.2),
+    Dropout(0.3),
     LSTM(lstm_units_2),
     Dense(total_words, activation='softmax')
 ])
 
 model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-# 🔧 Build before summary (so parameters show correctly)
 model.build(input_shape=(None, max_sequence_len - 1))
 model.summary()
 
@@ -110,7 +121,7 @@ model.summary()
 # -----------------------------
 history = model.fit(
     X_train, y_train,
-    epochs=30,
+    epochs=60,            # ⬆️ More training
     batch_size=128,
     validation_data=(X_test, y_test),
     callbacks=[early_stopping],
@@ -118,28 +129,31 @@ history = model.fit(
 )
 
 # -----------------------------
-# 7) Predict helper
+# 7) (Optional) Helper for testing prediction diversity
 # -----------------------------
-def predict_next_word(model, tokenizer, text, max_sequence_len):
+def sample_with_temperature(preds, temperature=0.8):
+    preds = np.asarray(preds).astype("float64")
+    preds = np.log(preds + 1e-8) / temperature
+    exp_preds = np.exp(preds)
+    preds = exp_preds / np.sum(exp_preds)
+    probas = np.random.multinomial(1, preds, 1)
+    return np.argmax(probas)
+
+def predict_next_word(model, tokenizer, text, max_sequence_len, temperature=0.8):
     token_list = tokenizer.texts_to_sequences([text.lower()])[0]
-    token_list = token_list[-(max_sequence_len - 1):] if len(token_list) >= (max_sequence_len - 1) else token_list
+    token_list = token_list[-(max_sequence_len - 1):]
     padded = pad_sequences([token_list], maxlen=max_sequence_len - 1, padding='pre')
     preds = model.predict(padded, verbose=0)
-    predicted_index = int(np.argmax(preds, axis=1)[0])
-    if predicted_index == 0:
-        return None
+    predicted_index = sample_with_temperature(preds[0], temperature)
     return tokenizer.index_word.get(predicted_index, None)
 
-# -----------------------------
-# 8) Example prediction
-# -----------------------------
-input_text = "fran you come most carefully vpon your"
-print(f"\nInput text: {input_text}")
-next_word = predict_next_word(model, tokenizer, input_text, max_sequence_len)
-print(f"Predicted next word: {next_word}")
+# Quick test (optional)
+test_input = "to be or not to"
+predicted_word = predict_next_word(model, tokenizer, test_input, max_sequence_len)
+print(f"\nExample prediction → Input: '{test_input}' → Predicted: {predicted_word}")
 
 # -----------------------------
-# 9) Save model and tokenizer
+# 8) Save model and tokenizer
 # -----------------------------
 model_filename = "model_word_lstm.keras"
 model.save(model_filename)
@@ -147,3 +161,4 @@ with open('tokenizer.pickle', 'wb') as handle:
     pickle.dump(tokenizer, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 print(f"\n✅ Saved model to {model_filename} and tokenizer to tokenizer.pickle")
+print("✅ Training completed successfully.")
